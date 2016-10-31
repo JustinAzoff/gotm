@@ -123,8 +123,22 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 			speedup = 0
 			if time.Since(lastcleanup) > packetTimeInterval {
 				lastcleanup = time.Now()
-				log.Printf("W%02d Tracking %d connections. total packets seen %d. total packets output %d", worker, len(seen), totalPackets, outputPackets)
-				seen = make(map[string]*trackedFlow)
+				stats, err := handle.Stats()
+				if err != nil {
+					log.Fatal(err)
+				}
+				//seen = make(map[string]*trackedFlow)
+				var remove []string
+				for flow, flw := range seen {
+					if lastcleanup.Sub(flw.last) > flowTimeout {
+						remove = append(remove, flow)
+					}
+				}
+				for _, rem := range remove {
+					delete(seen, rem)
+				}
+				log.Printf("W%02d conns=%d removed=%d pkts=%d output=%d recvd=%d dropped=%d ifdropped=%d", worker, len(seen), len(remove), totalPackets, outputPackets,
+					stats.PacketsReceived, stats.PacketsDropped, stats.PacketsIfDropped)
 			}
 		}
 	}
