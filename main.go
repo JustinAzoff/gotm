@@ -33,6 +33,7 @@ func init() {
 }
 
 type trackedFlow struct {
+	packets   int
 	bytecount int
 	last      time.Time
 }
@@ -103,15 +104,17 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 		flw := seen[flow]
 		if flw == nil {
 			flw = &trackedFlow{
+				packets:   1,
 				bytecount: len(packetData) - 64,
 				last:      time.Now(),
 			}
 			seen[flow] = flw
 			//log.Println("NEW", flw, flow)
 		} else {
-			flw.bytecount += len(packetData) - 64
 			flw.last = time.Now()
-			if flw.bytecount < 4096 {
+			if flw.bytecount < 4096 && flw.packets < 40 {
+				flw.packets += 1
+				flw.bytecount += len(packetData) - 64
 				//log.Println(flow, flw, "continues")
 				outputPackets += 1
 
