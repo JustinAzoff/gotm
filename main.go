@@ -70,6 +70,7 @@ func doSniff(intf string, worker int) {
 	var srcdstip, srcdstport, flow string
 	parser := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, &eth, &dot1q, &ip4, &ip6, &tcp, &udp)
 	decoded := []gopacket.LayerType{}
+	var speedup int
 	for {
 		packetData, ci, err := handle.ZeroCopyReadPacketData()
 		if err == io.EOF {
@@ -118,22 +119,12 @@ func doSniff(intf string, worker int) {
 			}
 		}
 		//Cleanup
-		if totalPackets%packetCountInterval == 0 && time.Since(lastcleanup) > packetTimeInterval {
+		speedup++
+		if speedup == 100 && time.Since(lastcleanup) > packetTimeInterval {
+			speedup = 0
 			lastcleanup = time.Now()
-			var remove []string
-			for flow, flw := range seen {
-				if lastcleanup.Sub(flw.last) > flowTimeout {
-					if flw.count > 100 {
-						log.Println("TO ", flw, flow)
-					}
-					remove = append(remove, flow)
-				}
-			}
-			for _, rem := range remove {
-				delete(seen, rem)
-			}
 			log.Printf("W%02d Tracking %d connections. total packets seen %d. total packets output %d", worker, len(seen), totalPackets, outputPackets)
-			log.Println()
+			seen = make(map[string]*trackedFlow)
 		}
 	}
 }
