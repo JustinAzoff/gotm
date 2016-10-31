@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/gopacket"
@@ -23,7 +24,11 @@ func (t trackedFlow) String() string {
 }
 
 func handlePacket(p gopacket.Packet) string {
-	src, dst := p.NetworkLayer().NetworkFlow().Endpoints()
+	nl := p.NetworkLayer()
+	if nl == nil {
+		return "wtf?"
+	}
+	src, dst := nl.NetworkFlow().Endpoints()
 	var sport, dport gopacket.Endpoint
 	tl := p.TransportLayer()
 	if tl != nil {
@@ -32,19 +37,19 @@ func handlePacket(p gopacket.Packet) string {
 	return fmt.Sprintf("%s:%s %s:%s", src, sport, dst, dport)
 }
 
-func main() {
+func doSniff(intf string, worker int) {
+	log.Printf("Starting worker %d", worker)
 	var err error
-	intf := os.Args[1]
-	handle, err := pcap.OpenLive(intf, 1600, true, pcap.BlockForever)
+	handle, err := pcap.OpenLive(intf, 9000, true, pcap.BlockForever)
 	if err != nil {
 		panic(err)
 	}
-	err = handle.SetBPFFilter("(ip or ip6) and not host 192.168.2.230")
+	err = handle.SetBPFFilter("vlan and (ip or ip6) and not host 192.168.2.230")
 	if err != nil { // optional
 		panic(err)
 	}
 
-	outf, err := os.Create("out.pcap")
+	outf, err := os.Create(fmt.Sprintf("out_%02d.pcap", worker))
 	pcapWriter := pcapgo.NewWriter(outf)
 	pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
 
@@ -70,7 +75,7 @@ func main() {
 				last:  time.Now(),
 			}
 			seen[flow] = flw
-			log.Println("NEW", flw, flow)
+			//log.Println("NEW", flw, flow)
 		} else {
 			flw.count += 1
 			flw.last = time.Now()
@@ -84,12 +89,14 @@ func main() {
 			}
 		}
 		//Cleanup
-		if totalPackets%100 == 0 && time.Since(lastcleanup) > time.Second {
+		if totalPackets%5000 == 0 && time.Since(lastcleanup) > 5*time.Second {
 			lastcleanup = time.Now()
 			var remove []string
 			for flow, flw := range seen {
 				if lastcleanup.Sub(flw.last) > 5*time.Second {
-					log.Println("TO ", flw, flow)
+					if flw.count > 100 {
+						log.Println("TO ", flw, flow)
+					}
 					remove = append(remove, flow)
 				}
 			}
@@ -99,5 +106,27 @@ func main() {
 			log.Printf("Tracking %d connections. total packets seen %d. total packets output %d", len(seen), totalPackets, outputPackets)
 			log.Println()
 		}
+	}
+}
+
+func main() {
+	workerCountString := os.Getenv("SNF_NUM_RINGS")
+	var workerCount int
+	workerCount = 1
+	if workerCountString != "" {
+		i, err := strconv.Atoi(workerCountString)
+		if err != nil {
+			log.Fatal(err)
+		}
+		workerCount = i
+	}
+
+	intf := os.Args[1]
+	log.Printf("Starting capture on %s with %d workers", intf, workerCount)
+	for worker := 0; worker < workerCount; worker++ {
+		go doSniff(intf, worker)
+	}
+	for {
+		time.Sleep(time.Hour)
 	}
 }
