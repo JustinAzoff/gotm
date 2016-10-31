@@ -74,13 +74,13 @@ func main() {
 		} else {
 			flw.count += 1
 			flw.last = time.Now()
-		}
-		if flw.count < 100 {
-			//log.Println(flow, flw, "continues")
-			outputPackets += 1
-			err = pcapWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
-			if err != nil {
-				log.Fatal("Error writing output pcap", err)
+			if flw.count < 100 {
+				//log.Println(flow, flw, "continues")
+				outputPackets += 1
+				err = pcapWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+				if err != nil {
+					log.Fatal("Error writing output pcap", err)
+				}
 			}
 		}
 		//Cleanup
