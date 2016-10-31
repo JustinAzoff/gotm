@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 )
 
@@ -29,14 +28,6 @@ func handlePacket(p gopacket.Packet) string {
 		sport, dport = tl.TransportFlow().Endpoints()
 	}
 	return fmt.Sprintf("%s:%s %s:%s", src, sport, dst, dport)
-}
-
-func isEnd(p gopacket.Packet) bool {
-	if tcpLayer := p.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-		tcp, _ := tcpLayer.(*layers.TCP)
-		return tcp.FIN || tcp.RST
-	}
-	return false
 }
 
 func main() {
@@ -81,10 +72,6 @@ func main() {
 			//log.Println(flow, flw, "continues")
 			outputPackets += 1
 		}
-		//if isEnd(packet) {
-		//	log.Println(flow, flw, "is over")
-		//	delete(seen, flow)
-		//}
 		//Cleanup
 		if totalPackets%100 == 0 && time.Since(lastcleanup) > time.Second {
 			lastcleanup = time.Now()
