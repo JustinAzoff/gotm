@@ -20,6 +20,7 @@ var (
 	filter              string
 	packetCountInterval int
 	packetTimeInterval  time.Duration
+	flowTimeout         time.Duration
 )
 
 func init() {
@@ -27,6 +28,7 @@ func init() {
 	flag.StringVar(&filter, "filter", "ip or ip6", "bpf filter")
 	flag.IntVar(&packetCountInterval, "countinterval", 5000, "Interval between cleanups")
 	flag.DurationVar(&packetTimeInterval, "timeinterval", 5*time.Second, "Interval between cleanups")
+	flag.DurationVar(&flowTimeout, "flowtimeout", 5*time.Second, "Flow inactivity timeout")
 }
 
 type trackedFlow struct {
@@ -116,7 +118,7 @@ func doSniff(intf string, worker int) {
 			lastcleanup = time.Now()
 			var remove []string
 			for flow, flw := range seen {
-				if lastcleanup.Sub(flw.last) > 5*time.Second {
+				if lastcleanup.Sub(flw.last) > flowTimeout {
 					if flw.count > 100 {
 						log.Println("TO ", flw, flow)
 					}
