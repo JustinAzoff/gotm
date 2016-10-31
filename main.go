@@ -17,17 +17,15 @@ import (
 )
 
 var (
-	iface               string
-	filter              string
-	packetCountInterval int
-	packetTimeInterval  time.Duration
-	flowTimeout         time.Duration
+	iface              string
+	filter             string
+	packetTimeInterval time.Duration
+	flowTimeout        time.Duration
 )
 
 func init() {
 	flag.StringVar(&iface, "interface", "en0", "Interface")
 	flag.StringVar(&filter, "filter", "ip or ip6", "bpf filter")
-	flag.IntVar(&packetCountInterval, "countinterval", 5000, "Interval between cleanups")
 	flag.DurationVar(&packetTimeInterval, "timeinterval", 5*time.Second, "Interval between cleanups")
 	flag.DurationVar(&flowTimeout, "flowtimeout", 5*time.Second, "Flow inactivity timeout")
 }
