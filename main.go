@@ -62,12 +62,13 @@ func doSniff(intf string, worker int) {
 	lastcleanup := time.Now()
 
 	var eth layers.Ethernet
+	var dot1q layers.Dot1Q
 	var ip4 layers.IPv4
 	var ip6 layers.IPv6
 	var tcp layers.TCP
 	var udp layers.UDP
 	var srcdstip, srcdstport, flow string
-	parser := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, &eth, &ip4, &ip6, &tcp, &udp)
+	parser := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, &eth, &dot1q, &ip4, &ip6, &tcp, &udp)
 	decoded := []gopacket.LayerType{}
 	for {
 		packetData, ci, err := handle.ZeroCopyReadPacketData()
@@ -79,6 +80,8 @@ func doSniff(intf string, worker int) {
 		totalPackets += 1
 
 		err = parser.DecodeLayers(packetData, &decoded)
+		srcdstip = ""
+		srcdstport = ""
 		for _, layerType := range decoded {
 			switch layerType {
 			case layers.LayerTypeIPv6:
