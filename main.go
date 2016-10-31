@@ -38,20 +38,6 @@ func (t trackedFlow) String() string {
 	return fmt.Sprintf("packets=%d last=%s", t.count, t.last)
 }
 
-func handlePacket(p gopacket.Packet) string {
-	nl := p.NetworkLayer()
-	if nl == nil {
-		return "wtf?"
-	}
-	src, dst := nl.NetworkFlow().Endpoints()
-	var sport, dport gopacket.Endpoint
-	tl := p.TransportLayer()
-	if tl != nil {
-		sport, dport = tl.TransportFlow().Endpoints()
-	}
-	return fmt.Sprintf("%s:%s %s:%s", src, sport, dst, dport)
-}
-
 func doSniff(intf string, worker int) {
 	log.Printf("Starting worker %d", worker)
 	var err error
@@ -72,17 +58,39 @@ func doSniff(intf string, worker int) {
 	totalPackets := 0
 	outputPackets := 0
 	lastcleanup := time.Now()
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+
+	var eth layers.Ethernet
+	var ip4 layers.IPv4
+	var ip6 layers.IPv6
+	var tcp layers.TCP
+	var udp layers.UDP
+	var srcdstip, srcdstport, flow string
+	parser := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, &eth, &ip4, &ip6, &tcp, &udp)
+	decoded := []gopacket.LayerType{}
 	for {
-		totalPackets += 1
-		packet, err := packetSource.NextPacket()
+		packetData, ci, err := handle.ZeroCopyReadPacketData()
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			log.Println("Error:", err)
-			continue
+			log.Fatal(err)
 		}
-		flow := handlePacket(packet) // Do something with each packet.
+		totalPackets += 1
+
+		err = parser.DecodeLayers(packetData, &decoded)
+		for _, layerType := range decoded {
+			switch layerType {
+			case layers.LayerTypeIPv6:
+				srcdstip = string(ip6.SrcIP) + string(ip6.DstIP)
+			case layers.LayerTypeIPv4:
+				srcdstip = string(ip4.SrcIP) + string(ip4.DstIP)
+			case layers.LayerTypeUDP:
+				srcdstport = string(udp.SrcPort) + string(udp.DstPort)
+			case layers.LayerTypeTCP:
+				srcdstport = string(tcp.SrcPort) + string(tcp.DstPort)
+			}
+		}
+		flow = srcdstip + srcdstport
+
 		flw := seen[flow]
 		if flw == nil {
 			flw = &trackedFlow{
@@ -97,7 +105,7 @@ func doSniff(intf string, worker int) {
 			if flw.count < 100 {
 				//log.Println(flow, flw, "continues")
 				outputPackets += 1
-				err = pcapWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+				err = pcapWriter.WritePacket(ci, packetData)
 				if err != nil {
 					log.Fatal("Error writing output pcap", err)
 				}
