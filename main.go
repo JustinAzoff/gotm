@@ -36,11 +36,16 @@ type trackedFlow struct {
 	last  time.Time
 }
 
+type PcapFrame struct {
+	ci   gopacket.CaptureInfo
+	data []byte
+}
+
 func (t trackedFlow) String() string {
 	return fmt.Sprintf("packets=%d last=%s", t.count, t.last)
 }
 
-func doSniff(intf string, worker int) {
+func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	log.Printf("Starting worker %d", worker)
 	var err error
 	handle, err := pcap.OpenLive(intf, 9000, true, pcap.BlockForever)
@@ -51,10 +56,6 @@ func doSniff(intf string, worker int) {
 	if err != nil { // optional
 		panic(err)
 	}
-
-	outf, err := os.Create(fmt.Sprintf("out_%02d.pcap", worker))
-	pcapWriter := pcapgo.NewWriter(outf)
-	pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
 
 	seen := make(map[string]*trackedFlow)
 	totalPackets := 0
@@ -112,19 +113,19 @@ func doSniff(intf string, worker int) {
 			if flw.count < 100 {
 				//log.Println(flow, flw, "continues")
 				outputPackets += 1
-				err = pcapWriter.WritePacket(ci, packetData)
-				if err != nil {
-					log.Fatal("Error writing output pcap", err)
-				}
+
+				writerchan <- PcapFrame{ci, packetData}
 			}
 		}
 		//Cleanup
 		speedup++
-		if speedup == 100 && time.Since(lastcleanup) > packetTimeInterval {
+		if speedup == 1000 {
 			speedup = 0
-			lastcleanup = time.Now()
-			log.Printf("W%02d Tracking %d connections. total packets seen %d. total packets output %d", worker, len(seen), totalPackets, outputPackets)
-			seen = make(map[string]*trackedFlow)
+			if time.Since(lastcleanup) > packetTimeInterval {
+				lastcleanup = time.Now()
+				log.Printf("W%02d Tracking %d connections. total packets seen %d. total packets output %d", worker, len(seen), totalPackets, outputPackets)
+				seen = make(map[string]*trackedFlow)
+			}
 		}
 	}
 }
@@ -143,11 +144,21 @@ func main() {
 		workerCount = i
 	}
 
+	outf, err := os.Create(fmt.Sprintf("out.pcap"))
+	pcapWriter := pcapgo.NewWriter(outf)
+	pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
+
+	pcapWriterChan := make(chan PcapFrame, 500000)
+
 	log.Printf("Starting capture on %s with %d workers", iface, workerCount)
 	for worker := 0; worker < workerCount; worker++ {
-		go doSniff(iface, worker)
+		go doSniff(iface, worker, pcapWriterChan)
 	}
-	for {
-		time.Sleep(time.Hour)
+
+	for pcf := range pcapWriterChan {
+		err = pcapWriter.WritePacket(pcf.ci, pcf.data)
+		if err != nil {
+			log.Fatal("Error writing output pcap", err)
+		}
 	}
 }
