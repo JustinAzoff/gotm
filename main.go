@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"flag"
 	"fmt"
 	"io"
@@ -160,8 +161,9 @@ func main() {
 		workerCount = i
 	}
 
-	outf, err := os.Create(fmt.Sprintf("out.pcap"))
-	pcapWriter := pcapgo.NewWriter(outf)
+	outf, err := os.Create(fmt.Sprintf("out.pcap.gz"))
+	outgz := gzip.NewWriter(outf)
+	pcapWriter := pcapgo.NewWriter(outgz)
 	pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
 
 	pcapWriterChan := make(chan PcapFrame, 500000)
