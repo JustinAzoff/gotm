@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -14,8 +15,19 @@ import (
 	"github.com/google/gopacket/pcapgo"
 )
 
-var packetCountInterval = 5000
-var packetTimeInterval = 5 * time.Second
+var (
+	iface               string
+	filter              string
+	packetCountInterval int
+	packetTimeInterval  time.Duration
+)
+
+func init() {
+	flag.StringVar(&iface, "interface", "en0", "Interface")
+	flag.StringVar(&filter, "filter", "ip or ip6", "bpf filter")
+	flag.IntVar(&packetCountInterval, "countinterval", 5000, "Interval between cleanups")
+	flag.DurationVar(&packetTimeInterval, "timeinterval", 5*time.Second, "Interval between cleanups")
+}
 
 type trackedFlow struct {
 	count int
@@ -47,7 +59,7 @@ func doSniff(intf string, worker int) {
 	if err != nil {
 		panic(err)
 	}
-	err = handle.SetBPFFilter("vlan and (ip or ip6) and not host 192.168.2.230")
+	err = handle.SetBPFFilter(filter)
 	if err != nil { // optional
 		panic(err)
 	}
@@ -113,6 +125,8 @@ func doSniff(intf string, worker int) {
 }
 
 func main() {
+	flag.Parse()
+
 	workerCountString := os.Getenv("SNF_NUM_RINGS")
 	var workerCount int
 	workerCount = 1
@@ -124,10 +138,9 @@ func main() {
 		workerCount = i
 	}
 
-	intf := os.Args[1]
-	log.Printf("Starting capture on %s with %d workers", intf, workerCount)
+	log.Printf("Starting capture on %s with %d workers", iface, workerCount)
 	for worker := 0; worker < workerCount; worker++ {
-		go doSniff(intf, worker)
+		go doSniff(iface, worker)
 	}
 	for {
 		time.Sleep(time.Hour)
