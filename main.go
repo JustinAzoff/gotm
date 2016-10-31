@@ -33,8 +33,8 @@ func init() {
 }
 
 type trackedFlow struct {
-	count int
-	last  time.Time
+	bytecount int
+	last      time.Time
 }
 
 type PcapFrame struct {
@@ -43,7 +43,7 @@ type PcapFrame struct {
 }
 
 func (t trackedFlow) String() string {
-	return fmt.Sprintf("packets=%d last=%s", t.count, t.last)
+	return fmt.Sprintf("bytecount=%d last=%s", t.bytecount, t.last)
 }
 
 func doSniff(intf string, worker int, writerchan chan PcapFrame) {
@@ -103,15 +103,15 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 		flw := seen[flow]
 		if flw == nil {
 			flw = &trackedFlow{
-				count: 1,
-				last:  time.Now(),
+				bytecount: len(packetData) - 64,
+				last:      time.Now(),
 			}
 			seen[flow] = flw
 			//log.Println("NEW", flw, flow)
 		} else {
-			flw.count += 1
+			flw.bytecount += len(packetData) - 64
 			flw.last = time.Now()
-			if flw.count < 100 {
+			if flw.bytecount < 4096 {
 				//log.Println(flow, flw, "continues")
 				outputPackets += 1
 
