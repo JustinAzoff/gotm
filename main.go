@@ -88,6 +88,7 @@ func doSniff(intf string, worker int) {
 				srcdstip = string(ip6.SrcIP) + string(ip6.DstIP)
 			case layers.LayerTypeIPv4:
 				srcdstip = string(ip4.SrcIP) + string(ip4.DstIP)
+				//log.Println(worker, ip4.SrcIP, ip4.DstIP)
 			case layers.LayerTypeUDP:
 				srcdstport = string(udp.SrcPort) + string(udp.DstPort)
 			case layers.LayerTypeTCP:
@@ -131,7 +132,7 @@ func doSniff(intf string, worker int) {
 			for _, rem := range remove {
 				delete(seen, rem)
 			}
-			log.Printf("Tracking %d connections. total packets seen %d. total packets output %d", len(seen), totalPackets, outputPackets)
+			log.Printf("W%02d Tracking %d connections. total packets seen %d. total packets output %d", worker, len(seen), totalPackets, outputPackets)
 			log.Println()
 		}
 	}
