@@ -14,6 +14,9 @@ import (
 	"github.com/google/gopacket/pcapgo"
 )
 
+var packetCountInterval = 5000
+var packetTimeInterval = 5 * time.Second
+
 type trackedFlow struct {
 	count int
 	last  time.Time
@@ -89,7 +92,7 @@ func doSniff(intf string, worker int) {
 			}
 		}
 		//Cleanup
-		if totalPackets%5000 == 0 && time.Since(lastcleanup) > 5*time.Second {
+		if totalPackets%packetCountInterval == 0 && time.Since(lastcleanup) > packetTimeInterval {
 			lastcleanup = time.Now()
 			var remove []string
 			for flow, flw := range seen {
