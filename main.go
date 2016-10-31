@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/pcapgo"
 )
 
 type trackedFlow struct {
@@ -41,6 +43,11 @@ func main() {
 	if err != nil { // optional
 		panic(err)
 	}
+
+	outf, err := os.Create("out.pcap")
+	pcapWriter := pcapgo.NewWriter(outf)
+	pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
+
 	seen := make(map[string]*trackedFlow)
 	totalPackets := 0
 	outputPackets := 0
@@ -71,6 +78,10 @@ func main() {
 		if flw.count < 100 {
 			//log.Println(flow, flw, "continues")
 			outputPackets += 1
+			err = pcapWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+			if err != nil {
+				log.Fatal("Error writing output pcap", err)
+			}
 		}
 		//Cleanup
 		if totalPackets%100 == 0 && time.Since(lastcleanup) > time.Second {
