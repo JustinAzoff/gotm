@@ -116,7 +116,10 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 				//log.Println(flow, flw, "continues")
 				outputPackets += 1
 
-				writerchan <- PcapFrame{ci, packetData}
+				packetDataCopy := make([]byte, len(packetData))
+				copy(packetDataCopy, packetData)
+
+				writerchan <- PcapFrame{ci, packetDataCopy}
 			}
 		}
 		//Cleanup
