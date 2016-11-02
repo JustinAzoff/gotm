@@ -215,9 +215,10 @@ func renamePcap(baseFilename string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	log.Printf("moved %s to %s", tempName, newName)
+	if err == nil {
+		log.Printf("moved %s to %s", tempName, newName)
+	}
 	return nil
-
 }
 
 func main() {
