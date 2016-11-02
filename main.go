@@ -41,6 +41,12 @@ type PcapFrame struct {
 	data []byte
 }
 
+type FiveTuple struct {
+	proto         layers.IPProtocol
+	networkFlow   gopacket.Flow
+	transportFlow gopacket.Flow
+}
+
 func (t trackedFlow) String() string {
 	return fmt.Sprintf("bytecount=%d last=%s", t.bytecount, t.last)
 }
@@ -57,7 +63,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 		panic(err)
 	}
 
-	seen := make(map[string]*trackedFlow)
+	seen := make(map[FiveTuple]*trackedFlow)
 	totalPackets := 0
 	outputPackets := 0
 	lastcleanup := time.Now()
@@ -68,7 +74,6 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	var ip6 layers.IPv6
 	var tcp layers.TCP
 	var udp layers.UDP
-	var srcdstip, srcdstport, flow string
 	parser := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, &eth, &dot1q, &ip4, &ip6, &tcp, &udp)
 	decoded := []gopacket.LayerType{}
 	var speedup int
@@ -82,22 +87,22 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 		totalPackets += 1
 
 		err = parser.DecodeLayers(packetData, &decoded)
-		srcdstip = ""
-		srcdstport = ""
+		var flow FiveTuple
 		for _, layerType := range decoded {
 			switch layerType {
 			case layers.LayerTypeIPv6:
-				srcdstip = string(ip6.SrcIP) + string(ip6.DstIP)
+				flow.proto = ip6.NextHeader
+				flow.networkFlow = ip6.NetworkFlow()
 			case layers.LayerTypeIPv4:
-				srcdstip = string(ip4.SrcIP) + string(ip4.DstIP)
+				flow.proto = ip4.Protocol
+				flow.networkFlow = ip4.NetworkFlow()
 				//log.Println(worker, ip4.SrcIP, ip4.DstIP)
 			case layers.LayerTypeUDP:
-				srcdstport = string(udp.SrcPort) + string(udp.DstPort)
+				flow.transportFlow = udp.TransportFlow()
 			case layers.LayerTypeTCP:
-				srcdstport = string(tcp.SrcPort) + string(tcp.DstPort)
+				flow.transportFlow = tcp.TransportFlow()
 			}
 		}
-		flow = srcdstip + srcdstport
 
 		flw := seen[flow]
 		if flw == nil {
@@ -133,7 +138,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 					log.Fatal(err)
 				}
 				//seen = make(map[string]*trackedFlow)
-				var remove []string
+				var remove []FiveTuple
 				for flow, flw := range seen {
 					if lastcleanup.Sub(flw.last) > flowTimeout {
 						remove = append(remove, flow)
