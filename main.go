@@ -7,7 +7,9 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/google/gopacket"
@@ -21,6 +23,9 @@ var (
 	filter             string
 	packetTimeInterval time.Duration
 	flowTimeout        time.Duration
+	writeOutputPath    string
+
+	rotationInterval time.Duration
 )
 
 func init() {
@@ -28,6 +33,8 @@ func init() {
 	flag.StringVar(&filter, "filter", "ip or ip6", "bpf filter")
 	flag.DurationVar(&packetTimeInterval, "timeinterval", 5*time.Second, "Interval between cleanups")
 	flag.DurationVar(&flowTimeout, "flowtimeout", 5*time.Second, "Flow inactivity timeout")
+	flag.StringVar(&writeOutputPath, "write", "out", "Base output path+filename")
+	flag.DurationVar(&rotationInterval, "rotationinterval", 300*time.Second, "Interval between pcap rotations")
 }
 
 type trackedFlow struct {
@@ -49,6 +56,17 @@ type FiveTuple struct {
 
 func (t trackedFlow) String() string {
 	return fmt.Sprintf("bytecount=%d last=%s", t.bytecount, t.last)
+}
+
+func mustAtoiWithDefault(s string, defaultValue int) int {
+	if s == "" {
+		return defaultValue
+	}
+	i, err := strconv.Atoi(s)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return i
 }
 
 func doSniff(intf string, worker int, writerchan chan PcapFrame) {
@@ -156,24 +174,57 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	}
 }
 
+type gzippedPcapWrapper struct {
+	w io.WriteCloser
+	z *gzip.Writer
+	*pcapgo.Writer
+}
+
+func (wrapper *gzippedPcapWrapper) Close() error {
+	gzerr := wrapper.z.Close()
+	ferr := wrapper.w.Close()
+
+	if gzerr != nil {
+		return gzerr
+	}
+	if ferr != nil {
+		return ferr
+	}
+
+	return nil
+}
+
+func openPcap(baseFilename string) (*gzippedPcapWrapper, error) {
+	tempName := fmt.Sprintf("%s_current.pcap.gz.tmp", baseFilename)
+	log.Printf("Opening new pcap file %s", tempName)
+	outf, err := os.Create(tempName)
+	if err != nil {
+		return nil, err
+	}
+	outgz := gzip.NewWriter(outf)
+	pcapWriter := pcapgo.NewWriter(outgz)
+	pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
+	return &gzippedPcapWrapper{outf, outgz, pcapWriter}, nil
+}
+
+func renamePcap(baseFilename string) error {
+	tempName := fmt.Sprintf("%s_current.pcap.gz.tmp", baseFilename)
+	newName := fmt.Sprintf("%s_%d.pcap.gz", baseFilename, time.Now().Unix())
+	err := os.Rename(tempName, newName)
+
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	log.Printf("moved %s to %s", tempName, newName)
+	return nil
+
+}
+
 func main() {
 	flag.Parse()
 
 	workerCountString := os.Getenv("SNF_NUM_RINGS")
-	var workerCount int
-	workerCount = 1
-	if workerCountString != "" {
-		i, err := strconv.Atoi(workerCountString)
-		if err != nil {
-			log.Fatal(err)
-		}
-		workerCount = i
-	}
-
-	outf, err := os.Create(fmt.Sprintf("out.pcap.gz"))
-	outgz := gzip.NewWriter(outf)
-	pcapWriter := pcapgo.NewWriter(outgz)
-	pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
+	workerCount := mustAtoiWithDefault(workerCountString, 1)
 
 	pcapWriterChan := make(chan PcapFrame, 500000)
 
@@ -182,10 +233,55 @@ func main() {
 		go doSniff(iface, worker, pcapWriterChan)
 	}
 
-	for pcf := range pcapWriterChan {
-		err = pcapWriter.WritePacket(pcf.ci, pcf.data)
-		if err != nil {
-			log.Fatal("Error writing output pcap", err)
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	rotationTicker := time.NewTicker(rotationInterval)
+
+	//Rename any leftover pcap files from a previous run
+	renamePcap(writeOutputPath)
+
+	var pcapWriter *gzippedPcapWrapper
+	pcapWriter, err := openPcap(writeOutputPath)
+	if err != nil {
+		log.Fatal("Error opening pcap", err)
+	}
+
+	for {
+		select {
+		case pcf := <-pcapWriterChan:
+			err := pcapWriter.WritePacket(pcf.ci, pcf.data)
+			if err != nil {
+				pcapWriter.Close()
+				log.Fatal("Error writing output pcap", err)
+			}
+
+		case <-rotationTicker.C:
+			log.Print("Rotating")
+			//FIXME: refactor/wrap the open/close/rename code?
+			err = pcapWriter.Close()
+			if err != nil {
+				log.Fatal("Error closing pcap", err)
+			}
+			err = renamePcap(writeOutputPath)
+			if err != nil {
+				log.Fatal("Error renaming pcap", err)
+			}
+			pcapWriter, err = openPcap(writeOutputPath)
+			if err != nil {
+				log.Fatal("Error opening pcap", err)
+			}
+
+		case <-signals:
+			log.Print("Control-C??")
+			err = pcapWriter.Close()
+			if err != nil {
+				log.Fatal("Error Closing", err)
+			}
+			err = renamePcap(writeOutputPath)
+			if err != nil {
+				log.Fatal("Error renaming pcap", err)
+			}
+			os.Exit(0)
 		}
 	}
 }
