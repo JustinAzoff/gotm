@@ -209,7 +209,8 @@ func openPcap(baseFilename string) (*gzippedPcapWrapper, error) {
 
 func renamePcap(baseFilename string) error {
 	tempName := fmt.Sprintf("%s_current.pcap.gz.tmp", baseFilename)
-	newName := fmt.Sprintf("%s_%d.pcap.gz", baseFilename, time.Now().Unix())
+	datePart := time.Now().Format("2006-01-02T15-04-05")
+	newName := fmt.Sprintf("%s_%s.pcap.gz", baseFilename, datePart)
 	err := os.Rename(tempName, newName)
 
 	if err != nil && !os.IsNotExist(err) {
