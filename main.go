@@ -72,7 +72,7 @@ func mustAtoiWithDefault(s string, defaultValue int) int {
 func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	log.Printf("Starting worker %d", worker)
 	var err error
-	handle, err := pcap.OpenLive(intf, 9000, true, pcap.BlockForever)
+	handle, err := pcap.OpenLive(intf, 9216, true, pcap.BlockForever)
 	if err != nil {
 		panic(err)
 	}
