@@ -18,6 +18,10 @@ import (
 	"github.com/google/gopacket/pcapgo"
 )
 
+const (
+	MAX_ETHERNET_MTU = 9216
+)
+
 var (
 	iface              string
 	filter             string
@@ -72,7 +76,7 @@ func mustAtoiWithDefault(s string, defaultValue int) int {
 func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	log.Printf("Starting worker %d", worker)
 	var err error
-	handle, err := pcap.OpenLive(intf, 9000, true, pcap.BlockForever)
+	handle, err := pcap.OpenLive(intf, MAX_ETHERNET_MTU, true, pcap.BlockForever)
 	if err != nil {
 		panic(err)
 	}
