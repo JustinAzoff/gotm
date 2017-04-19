@@ -124,26 +124,21 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 
 		flw := seen[flow]
 		if flw == nil {
-			flw = &trackedFlow{
-				packets:   1,
-				bytecount: len(packetData) - 64,
-				last:      time.Now(),
-			}
+			flw = &trackedFlow{}
 			seen[flow] = flw
 			//log.Println("NEW", flw, flow)
-		} else {
-			flw.last = time.Now()
-			if flw.bytecount < 4096 && flw.packets < 40 {
-				flw.packets += 1
-				flw.bytecount += len(packetData) - 64
-				//log.Println(flow, flw, "continues")
-				outputPackets += 1
+		}
+		flw.last = time.Now()
+		if flw.bytecount < 4096 && flw.packets < 40 {
+			flw.packets += 1
+			flw.bytecount += len(packetData) - 64
+			//log.Println(flow, flw, "continues")
+			outputPackets += 1
 
-				packetDataCopy := make([]byte, len(packetData))
-				copy(packetDataCopy, packetData)
+			packetDataCopy := make([]byte, len(packetData))
+			copy(packetDataCopy, packetData)
 
-				writerchan <- PcapFrame{ci, packetDataCopy}
-			}
+			writerchan <- PcapFrame{ci, packetDataCopy}
 		}
 		//Cleanup
 		speedup++
