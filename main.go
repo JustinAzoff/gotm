@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,6 +19,9 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/pcapgo"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
@@ -25,6 +29,8 @@ const (
 )
 
 var (
+	metricsAddress string
+
 	iface              string
 	filter             string
 	packetTimeInterval time.Duration
@@ -34,13 +40,84 @@ var (
 	rotationInterval time.Duration
 )
 
+//Metrics
+var (
+	labels = []string{
+		// Which interface
+		"interface",
+		// Which worker
+		"worker",
+	}
+
+	mActiveFlows = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gotm_active_flow_count",
+			Help: "Current number of active flows",
+		}, labels,
+	)
+	mExpired = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gotm_expired_flow_count",
+			Help: "Current number of expired flows in the last packetTimeInterval",
+		}, labels,
+	)
+	mPackets = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gotm_packet_count",
+			Help: "Number of packets seen",
+		}, labels,
+	)
+	mOutput = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gotm_packet_output_count",
+			Help: "Number of packets output after filtering",
+		}, labels,
+	)
+	mFlows = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gotm_flow_count",
+			Help: "Number of flows seen",
+		}, labels,
+	)
+
+	// These should be gauges, but can't.. https://github.com/prometheus/client_golang/issues/309
+	mReceived = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gotm_packet_nic_received",
+			Help: "Number of packets received by NIC",
+		}, labels,
+	)
+	mDropped = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gotm_packet_nic_dropped",
+			Help: "Number of packets dropped by NIC",
+		}, labels,
+	)
+	mIfDropped = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gotm_packet_nic_if_dropped",
+			Help: "Number of packets dropped by NIC at the interface",
+		}, labels,
+	)
+)
+
 func init() {
+	flag.StringVar(&metricsAddress, "metrics-address", ":8080", "The address to listen on for HTTP requests for /metrics.")
 	flag.StringVar(&iface, "interface", "eth0", "Comma separated list of interfaces")
 	flag.StringVar(&filter, "filter", "ip or ip6", "bpf filter")
 	flag.DurationVar(&packetTimeInterval, "timeinterval", 5*time.Second, "Interval between cleanups")
 	flag.DurationVar(&flowTimeout, "flowtimeout", 5*time.Second, "Flow inactivity timeout")
 	flag.StringVar(&writeOutputPath, "write", "out", "Output path is $writeOutputPath/yyyy/mm/dd/ts.pcap")
 	flag.DurationVar(&rotationInterval, "rotationinterval", 300*time.Second, "Interval between pcap rotations")
+
+	prometheus.MustRegister(mActiveFlows)
+	prometheus.MustRegister(mExpired)
+	prometheus.MustRegister(mPackets)
+	prometheus.MustRegister(mOutput)
+	prometheus.MustRegister(mFlows)
+	prometheus.MustRegister(mReceived)
+	prometheus.MustRegister(mDropped)
+	prometheus.MustRegister(mIfDropped)
 }
 
 type trackedFlow struct {
@@ -77,6 +154,8 @@ func mustAtoiWithDefault(s string, defaultValue int) int {
 
 func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	log.Printf("Starting worker %d on interface %s", worker, intf)
+	workerString := fmt.Sprintf("%d", worker)
+
 	var err error
 	handle, err := pcap.OpenLive(intf, MAX_ETHERNET_MTU, true, pcap.BlockForever)
 	if err != nil {
@@ -88,8 +167,9 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	}
 
 	seen := make(map[FiveTuple]*trackedFlow)
-	totalPackets := 0
-	outputPackets := 0
+	var totalFlows, removedFlows, totalPackets, outputPackets uint
+	var pcapStats *pcap.Stats
+	pcapStats, err = handle.Stats()
 	lastcleanup := time.Now()
 
 	var eth layers.Ethernet
@@ -133,6 +213,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 			flw = &trackedFlow{}
 			seen[flow] = flw
 			//log.Println("NEW", flw, flow)
+			totalFlows += 1
 		}
 		flw.last = time.Now()
 		if flw.bytecount < 4096 && flw.packets < 40 {
@@ -148,29 +229,46 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 		}
 		//Cleanup
 		speedup++
-		if speedup == 1000 {
+		if speedup == 5000 {
 			speedup = 0
 			if time.Since(lastcleanup) > packetTimeInterval {
 				lastcleanup = time.Now()
-				stats, err := handle.Stats()
-				if err != nil {
-					log.Fatal(err)
-				}
 				//seen = make(map[string]*trackedFlow)
 				var remove []FiveTuple
 				for flow, flw := range seen {
 					if lastcleanup.Sub(flw.last) > flowTimeout {
 						remove = append(remove, flow)
+						removedFlows += 1
 					}
 				}
 				for _, rem := range remove {
 					delete(seen, rem)
 				}
-				log.Printf("if=%s W=%02d conns=%d removed=%d pkts=%d output=%d outpct=%.1f recvd=%d dropped=%d ifdropped=%d",
+				log.Printf("if=%s W=%02d flows=%d removed=%d pkts=%d output=%d outpct=%.1f recvd=%d dropped=%d ifdropped=%d",
 					intf, worker, len(seen), len(remove),
 					totalPackets, outputPackets, 100*float64(outputPackets)/float64(totalPackets),
-					stats.PacketsReceived, stats.PacketsDropped, stats.PacketsIfDropped)
+					pcapStats.PacketsReceived, pcapStats.PacketsDropped, pcapStats.PacketsIfDropped)
+
+				mExpired.WithLabelValues(intf, workerString).Set(float64(len(remove)))
 			}
+			pcapStats, err = handle.Stats()
+			if err != nil {
+				log.Fatal(err)
+			}
+			mActiveFlows.WithLabelValues(intf, workerString).Set(float64(len(seen)))
+
+			mFlows.WithLabelValues(intf, workerString).Add(float64(totalFlows))
+			totalFlows = 0
+
+			mPackets.WithLabelValues(intf, workerString).Add(float64(totalPackets))
+			totalPackets = 0
+
+			mOutput.WithLabelValues(intf, workerString).Add(float64(outputPackets))
+			outputPackets = 0
+
+			mReceived.WithLabelValues(intf, workerString).Set(float64(pcapStats.PacketsReceived))
+			mDropped.WithLabelValues(intf, workerString).Set(float64(pcapStats.PacketsDropped))
+			mIfDropped.WithLabelValues(intf, workerString).Set(float64(pcapStats.PacketsIfDropped))
 		}
 	}
 }
@@ -229,8 +327,19 @@ func renamePcap(tempName, outputPath string) error {
 	return nil
 }
 
+func metrics() {
+	http.Handle("/metrics", promhttp.Handler())
+	err := http.ListenAndServe(metricsAddress, nil)
+	if err != nil {
+		log.Print(err)
+	}
+	//Not fatal?
+}
+
 func main() {
 	flag.Parse()
+
+	go metrics()
 
 	currentFileName := fmt.Sprintf("%s_current.pcap.gz.tmp", iface)
 	workerCountString := os.Getenv("SNF_NUM_RINGS")
