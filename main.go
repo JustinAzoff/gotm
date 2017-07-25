@@ -166,8 +166,8 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 				for _, rem := range remove {
 					delete(seen, rem)
 				}
-				log.Printf("W%02d conns=%d removed=%d pkts=%d output=%d outpct=%.1f recvd=%d dropped=%d ifdropped=%d",
-					worker, len(seen), len(remove),
+				log.Printf("if=%s W=%02d conns=%d removed=%d pkts=%d output=%d outpct=%.1f recvd=%d dropped=%d ifdropped=%d",
+					intf, worker, len(seen), len(remove),
 					totalPackets, outputPackets, 100*float64(outputPackets)/float64(totalPackets),
 					stats.PacketsReceived, stats.PacketsDropped, stats.PacketsIfDropped)
 			}
