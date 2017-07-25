@@ -8,7 +8,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,11 +35,11 @@ var (
 )
 
 func init() {
-	flag.StringVar(&iface, "interface", "en0", "Interface")
+	flag.StringVar(&iface, "interface", "eth0", "Comma separated list of interfaces")
 	flag.StringVar(&filter, "filter", "ip or ip6", "bpf filter")
 	flag.DurationVar(&packetTimeInterval, "timeinterval", 5*time.Second, "Interval between cleanups")
 	flag.DurationVar(&flowTimeout, "flowtimeout", 5*time.Second, "Flow inactivity timeout")
-	flag.StringVar(&writeOutputPath, "write", "out", "Base output path+filename")
+	flag.StringVar(&writeOutputPath, "write", "out", "Output path is $writeOutputPath/yyyy/mm/dd/ts.pcap")
 	flag.DurationVar(&rotationInterval, "rotationinterval", 300*time.Second, "Interval between pcap rotations")
 }
 
@@ -74,7 +76,7 @@ func mustAtoiWithDefault(s string, defaultValue int) int {
 }
 
 func doSniff(intf string, worker int, writerchan chan PcapFrame) {
-	log.Printf("Starting worker %d", worker)
+	log.Printf("Starting worker %d on interface %s", worker, intf)
 	var err error
 	handle, err := pcap.OpenLive(intf, MAX_ETHERNET_MTU, true, pcap.BlockForever)
 	if err != nil {
@@ -194,9 +196,8 @@ func (wrapper *gzippedPcapWrapper) Close() error {
 }
 
 func openPcap(baseFilename string) (*gzippedPcapWrapper, error) {
-	tempName := fmt.Sprintf("%s_current.pcap.gz.tmp", baseFilename)
-	log.Printf("Opening new pcap file %s", tempName)
-	outf, err := os.Create(tempName)
+	log.Printf("Opening new pcap file %s", baseFilename)
+	outf, err := os.Create(baseFilename)
 	if err != nil {
 		return nil, err
 	}
@@ -206,10 +207,17 @@ func openPcap(baseFilename string) (*gzippedPcapWrapper, error) {
 	return &gzippedPcapWrapper{outf, outgz, pcapWriter}, nil
 }
 
-func renamePcap(baseFilename string) error {
-	tempName := fmt.Sprintf("%s_current.pcap.gz.tmp", baseFilename)
-	datePart := time.Now().Format("2006-01-02T15-04-05")
-	newName := fmt.Sprintf("%s_%s.pcap.gz", baseFilename, datePart)
+//renamePcap renames the 'current' file to
+//writeOutputPath/yyy/mm/dd/yyyy-mm-ddThh-mm-ss.pcap.gz
+
+func renamePcap(tempName, outputPath string) error {
+	datePart := time.Now().Format("2006/01/02/2006-01-02T15-04-05.pcap.gz")
+
+	newName := filepath.Join(outputPath, datePart)
+	//Ensure the directori exists
+	if err := os.MkdirAll(filepath.Dir(newName), 0700); err != nil {
+		return err
+	}
 	err := os.Rename(tempName, newName)
 
 	if err != nil && !os.IsNotExist(err) {
@@ -224,14 +232,19 @@ func renamePcap(baseFilename string) error {
 func main() {
 	flag.Parse()
 
+	currentFileName := fmt.Sprintf("%s_current.pcap.gz.tmp", iface)
 	workerCountString := os.Getenv("SNF_NUM_RINGS")
 	workerCount := mustAtoiWithDefault(workerCountString, 1)
 
 	pcapWriterChan := make(chan PcapFrame, 500000)
 
-	log.Printf("Starting capture on %s with %d workers", iface, workerCount)
-	for worker := 0; worker < workerCount; worker++ {
-		go doSniff(iface, worker, pcapWriterChan)
+	interfaceList := strings.Split(iface, ",")
+
+	for _, iface := range interfaceList {
+		log.Printf("Starting capture on %s with %d workers", iface, workerCount)
+		for worker := 0; worker < workerCount; worker++ {
+			go doSniff(iface, worker, pcapWriterChan)
+		}
 	}
 
 	signals := make(chan os.Signal, 2)
@@ -239,10 +252,10 @@ func main() {
 	rotationTicker := time.NewTicker(rotationInterval)
 
 	//Rename any leftover pcap files from a previous run
-	renamePcap(writeOutputPath)
+	renamePcap(currentFileName, writeOutputPath)
 
 	var pcapWriter *gzippedPcapWrapper
-	pcapWriter, err := openPcap(writeOutputPath)
+	pcapWriter, err := openPcap(currentFileName)
 	if err != nil {
 		log.Fatal("Error opening pcap", err)
 	}
@@ -263,11 +276,11 @@ func main() {
 			if err != nil {
 				log.Fatal("Error closing pcap", err)
 			}
-			err = renamePcap(writeOutputPath)
+			err = renamePcap(currentFileName, writeOutputPath)
 			if err != nil {
 				log.Fatal("Error renaming pcap", err)
 			}
-			pcapWriter, err = openPcap(writeOutputPath)
+			pcapWriter, err = openPcap(currentFileName)
 			if err != nil {
 				log.Fatal("Error opening pcap", err)
 			}
@@ -278,7 +291,7 @@ func main() {
 			if err != nil {
 				log.Fatal("Error Closing", err)
 			}
-			err = renamePcap(writeOutputPath)
+			err = renamePcap(currentFileName, writeOutputPath)
 			if err != nil {
 				log.Fatal("Error renaming pcap", err)
 			}
