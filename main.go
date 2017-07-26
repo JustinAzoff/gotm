@@ -61,16 +61,22 @@ var (
 			Help: "Current number of expired flows in the last packetTimeInterval",
 		}, labels,
 	)
-	mPackets = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "gotm_packet_count",
-			Help: "Number of packets seen",
-		}, labels,
-	)
 	mBytes = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "gotm_bytes_total",
 			Help: "Number of bytes seen",
+		}, labels,
+	)
+	mBytesOutput = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gotm_bytes_output_total",
+			Help: "Number of bytes output after filtering",
+		}, labels,
+	)
+	mPackets = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gotm_packet_count",
+			Help: "Number of packets seen",
 		}, labels,
 	)
 	mOutput = prometheus.NewCounterVec(
@@ -119,8 +125,9 @@ func init() {
 	prometheus.MustRegister(mActiveFlows)
 	prometheus.MustRegister(mExpired)
 	prometheus.MustRegister(mPackets)
-	prometheus.MustRegister(mBytes)
 	prometheus.MustRegister(mOutput)
+	prometheus.MustRegister(mBytes)
+	prometheus.MustRegister(mBytesOutput)
 	prometheus.MustRegister(mFlows)
 	prometheus.MustRegister(mReceived)
 	prometheus.MustRegister(mDropped)
@@ -174,7 +181,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	}
 
 	seen := make(map[FiveTuple]*trackedFlow)
-	var totalFlows, removedFlows, totalBytes, totalPackets, outputPackets uint
+	var totalFlows, removedFlows, totalBytes, outputBytes, totalPackets, outputPackets uint
 	var pcapStats *pcap.Stats
 	pcapStats, err = handle.Stats()
 	lastcleanup := time.Now()
@@ -229,6 +236,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 			flw.bytecount += len(packetData) - 64
 			//log.Println(flow, flw, "continues")
 			outputPackets += 1
+			outputBytes += uint(len(packetData))
 
 			packetDataCopy := make([]byte, len(packetData))
 			copy(packetDataCopy, packetData)
@@ -273,6 +281,9 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 
 			mBytes.WithLabelValues(intf, workerString).Add(float64(totalBytes))
 			totalBytes = 0
+
+			mBytesOutput.WithLabelValues(intf, workerString).Add(float64(outputBytes))
+			outputBytes = 0
 
 			mOutput.WithLabelValues(intf, workerString).Add(float64(outputPackets))
 			outputPackets = 0
