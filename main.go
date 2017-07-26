@@ -183,7 +183,6 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	seen := make(map[FiveTuple]*trackedFlow)
 	var totalFlows, removedFlows, totalBytes, outputBytes, totalPackets, outputPackets uint
 	var pcapStats *pcap.Stats
-	pcapStats, err = handle.Stats()
 	lastcleanup := time.Now()
 
 	var eth layers.Ethernet
@@ -247,6 +246,10 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 		speedup++
 		if speedup == 5000 {
 			speedup = 0
+			pcapStats, err = handle.Stats()
+			if err != nil {
+				log.Fatal(err)
+			}
 			if time.Since(lastcleanup) > packetTimeInterval {
 				lastcleanup = time.Now()
 				//seen = make(map[string]*trackedFlow)
@@ -266,10 +269,6 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 					pcapStats.PacketsReceived, pcapStats.PacketsDropped, pcapStats.PacketsIfDropped)
 
 				mExpired.WithLabelValues(intf, workerString).Set(float64(len(remove)))
-			}
-			pcapStats, err = handle.Stats()
-			if err != nil {
-				log.Fatal(err)
 			}
 			mActiveFlows.WithLabelValues(intf, workerString).Set(float64(len(seen)))
 
