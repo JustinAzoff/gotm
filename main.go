@@ -67,6 +67,12 @@ var (
 			Help: "Number of packets seen",
 		}, labels,
 	)
+	mBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gotm_bytes_total",
+			Help: "Number of bytes seen",
+		}, labels,
+	)
 	mOutput = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "gotm_packet_output_count",
@@ -113,6 +119,7 @@ func init() {
 	prometheus.MustRegister(mActiveFlows)
 	prometheus.MustRegister(mExpired)
 	prometheus.MustRegister(mPackets)
+	prometheus.MustRegister(mBytes)
 	prometheus.MustRegister(mOutput)
 	prometheus.MustRegister(mFlows)
 	prometheus.MustRegister(mReceived)
@@ -167,7 +174,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	}
 
 	seen := make(map[FiveTuple]*trackedFlow)
-	var totalFlows, removedFlows, totalPackets, outputPackets uint
+	var totalFlows, removedFlows, totalBytes, totalPackets, outputPackets uint
 	var pcapStats *pcap.Stats
 	pcapStats, err = handle.Stats()
 	lastcleanup := time.Now()
@@ -189,6 +196,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 			log.Fatal(err)
 		}
 		totalPackets += 1
+		totalBytes += uint(len(packetData))
 
 		err = parser.DecodeLayers(packetData, &decoded)
 		var flow FiveTuple
@@ -244,9 +252,9 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 				for _, rem := range remove {
 					delete(seen, rem)
 				}
-				log.Printf("if=%s W=%02d flows=%d removed=%d pkts=%d output=%d outpct=%.1f recvd=%d dropped=%d ifdropped=%d",
+				log.Printf("if=%s W=%02d flows=%d removed=%d bytes=%d pkts=%d output=%d outpct=%.1f recvd=%d dropped=%d ifdropped=%d",
 					intf, worker, len(seen), len(remove),
-					totalPackets, outputPackets, 100*float64(outputPackets)/float64(totalPackets),
+					totalBytes, totalPackets, outputPackets, 100*float64(outputPackets)/float64(totalPackets),
 					pcapStats.PacketsReceived, pcapStats.PacketsDropped, pcapStats.PacketsIfDropped)
 
 				mExpired.WithLabelValues(intf, workerString).Set(float64(len(remove)))
@@ -262,6 +270,9 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 
 			mPackets.WithLabelValues(intf, workerString).Add(float64(totalPackets))
 			totalPackets = 0
+
+			mBytes.WithLabelValues(intf, workerString).Add(float64(totalBytes))
+			totalBytes = 0
 
 			mOutput.WithLabelValues(intf, workerString).Add(float64(outputPackets))
 			outputPackets = 0
