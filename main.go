@@ -27,7 +27,7 @@ import (
 const (
 	MAX_ETHERNET_MTU       = 9216
 	MINIMUM_IP_PACKET_SIZE = 58
-	LARGE_FLOW_SIZE        = 1024 * 1024 * 1024 * 1 //1 GB
+	LARGE_FLOW_SIZE        = 1024 * 1024 * 1024 * 8 //1 GB
 )
 
 var (
@@ -254,7 +254,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 
 			writerchan <- PcapFrame{ci, packetDataCopy}
 		} else if flw.logged == false && flw.bytecount > LARGE_FLOW_SIZE {
-			log.Printf("Large flow over 1GB: %s", flow)
+			log.Printf("Large flow over 8GB: %s", flow)
 			flw.logged = true
 		}
 		//Cleanup
