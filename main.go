@@ -25,7 +25,8 @@ import (
 )
 
 const (
-	MAX_ETHERNET_MTU = 9216
+	MAX_ETHERNET_MTU       = 9216
+	MINIMUM_IP_PACKET_SIZE = 58
 )
 
 var (
@@ -232,7 +233,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 		flw.last = time.Now()
 		if flw.bytecount < 4096 && flw.packets < 40 {
 			flw.packets += 1
-			flw.bytecount += len(packetData) - 64
+			flw.bytecount += len(packetData) - MINIMUM_IP_PACKET_SIZE
 			//log.Println(flow, flw, "continues")
 			outputPackets += 1
 			outputBytes += uint(len(packetData))
