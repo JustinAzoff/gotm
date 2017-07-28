@@ -27,6 +27,7 @@ import (
 const (
 	MAX_ETHERNET_MTU       = 9216
 	MINIMUM_IP_PACKET_SIZE = 58
+	LARGE_FLOW_SIZE        = 1024 * 1024 * 1024 * 1 //1 GB
 )
 
 var (
@@ -136,9 +137,14 @@ func init() {
 }
 
 type trackedFlow struct {
-	packets   int
-	bytecount int
+	packets   uint
+	bytecount uint
 	last      time.Time
+	logged    bool
+}
+
+func (t trackedFlow) String() string {
+	return fmt.Sprintf("packets=%d bytecount=%d last=%s", t.packets, t.bytecount, t.last)
 }
 
 type PcapFrame struct {
@@ -152,8 +158,10 @@ type FiveTuple struct {
 	transportFlow gopacket.Flow
 }
 
-func (t trackedFlow) String() string {
-	return fmt.Sprintf("bytecount=%d last=%s", t.bytecount, t.last)
+func (f FiveTuple) String() string {
+	src, dst := f.networkFlow.Endpoints()
+	sport, dport := f.transportFlow.Endpoints()
+	return fmt.Sprintf("src=%s sport=%s dst=%s dport=%s", src, sport, dst, dport)
 }
 
 func mustAtoiWithDefault(s string, defaultValue int) int {
@@ -231,9 +239,12 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 			totalFlows += 1
 		}
 		flw.last = time.Now()
+		flw.packets += 1
+		pl := uint(len(packetData))
+		if pl > MINIMUM_IP_PACKET_SIZE {
+			flw.bytecount += pl - MINIMUM_IP_PACKET_SIZE
+		}
 		if flw.bytecount < 4096 && flw.packets < 40 {
-			flw.packets += 1
-			flw.bytecount += len(packetData) - MINIMUM_IP_PACKET_SIZE
 			//log.Println(flow, flw, "continues")
 			outputPackets += 1
 			outputBytes += uint(len(packetData))
@@ -242,6 +253,9 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 			copy(packetDataCopy, packetData)
 
 			writerchan <- PcapFrame{ci, packetDataCopy}
+		} else if flw.logged == false && flw.bytecount > LARGE_FLOW_SIZE {
+			log.Printf("Large flow over 1GB: %s", flow)
+			flw.logged = true
 		}
 		//Cleanup
 		speedup++
