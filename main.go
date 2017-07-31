@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -176,6 +177,7 @@ func mustAtoiWithDefault(s string, defaultValue int) int {
 }
 
 func doSniff(intf string, worker int, writerchan chan PcapFrame) {
+	runtime.LockOSThread()
 	log.Printf("Starting worker %d on interface %s", worker, intf)
 	workerString := fmt.Sprintf("%d", worker)
 
