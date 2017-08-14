@@ -28,7 +28,7 @@ import (
 const (
 	MAX_ETHERNET_MTU       = 9216
 	MINIMUM_IP_PACKET_SIZE = 58
-	LARGE_FLOW_SIZE        = 1024 * 1024 * 1024 * 8 //1 GB
+	LARGE_FLOW_SIZE        = 1024 * 1024 * 1024 * 8 //8 GB
 )
 
 var (
@@ -38,6 +38,8 @@ var (
 	filter             string
 	packetTimeInterval time.Duration
 	flowTimeout        time.Duration
+	flowByteCutoff     uint
+	flowPacketCutoff   uint
 	writeOutputPath    string
 
 	rotationInterval time.Duration
@@ -122,6 +124,8 @@ func init() {
 	flag.StringVar(&filter, "filter", "ip or ip6", "bpf filter")
 	flag.DurationVar(&packetTimeInterval, "timeinterval", 5*time.Second, "Interval between cleanups")
 	flag.DurationVar(&flowTimeout, "flowtimeout", 5*time.Second, "Flow inactivity timeout")
+	flag.UintVar(&flowByteCutoff, "bytecutoff", 8192, "Cut off flows after this many bytes")
+	flag.UintVar(&flowPacketCutoff, "packetcutoff", 100, "Cut off flows after this many packets")
 	flag.StringVar(&writeOutputPath, "write", "out", "Output path is $writeOutputPath/yyyy/mm/dd/ts.pcap")
 	flag.DurationVar(&rotationInterval, "rotationinterval", 300*time.Second, "Interval between pcap rotations")
 
@@ -246,7 +250,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 		if pl > MINIMUM_IP_PACKET_SIZE {
 			flw.bytecount += pl - MINIMUM_IP_PACKET_SIZE
 		}
-		if flw.bytecount < 4096 && flw.packets < 40 {
+		if flw.bytecount < flowByteCutoff && flw.packets < flowPacketCutoff {
 			//log.Println(flow, flw, "continues")
 			outputPackets += 1
 			outputBytes += uint(len(packetData))
