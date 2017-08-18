@@ -41,6 +41,7 @@ var (
 	flowByteCutoff     uint
 	flowPacketCutoff   uint
 	writeOutputPath    string
+	writeCompressed    bool
 
 	rotationInterval time.Duration
 )
@@ -127,6 +128,7 @@ func init() {
 	flag.UintVar(&flowByteCutoff, "bytecutoff", 8192, "Cut off flows after this many bytes")
 	flag.UintVar(&flowPacketCutoff, "packetcutoff", 100, "Cut off flows after this many packets")
 	flag.StringVar(&writeOutputPath, "write", "out", "Output path is $writeOutputPath/yyyy/mm/dd/ts.pcap")
+	flag.BoolVar(&writeCompressed, "compress", false, "gzip pcaps as they are written")
 	flag.DurationVar(&rotationInterval, "rotationinterval", 300*time.Second, "Interval between pcap rotations")
 
 	prometheus.MustRegister(mActiveFlows)
@@ -315,6 +317,16 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	}
 }
 
+type pcapWrapper interface {
+	WritePacket(ci gopacket.CaptureInfo, data []byte) error
+	Close() error
+}
+
+type regularPcapWrapper struct {
+	io.WriteCloser
+	*pcapgo.Writer
+}
+
 type gzippedPcapWrapper struct {
 	w io.WriteCloser
 	z *gzip.Writer
@@ -335,23 +347,36 @@ func (wrapper *gzippedPcapWrapper) Close() error {
 	return nil
 }
 
-func openPcap(baseFilename string) (*gzippedPcapWrapper, error) {
+func openPcap(baseFilename string) (pcapWrapper, error) {
+	if writeCompressed {
+		baseFilename = baseFilename + ".gz"
+	}
 	log.Printf("Opening new pcap file %s", baseFilename)
 	outf, err := os.Create(baseFilename)
 	if err != nil {
 		return nil, err
 	}
-	outgz := gzip.NewWriter(outf)
-	pcapWriter := pcapgo.NewWriter(outgz)
-	pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
-	return &gzippedPcapWrapper{outf, outgz, pcapWriter}, nil
+	if writeCompressed {
+		outgz := gzip.NewWriter(outf)
+		pcapWriter := pcapgo.NewWriter(outgz)
+		pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
+		return &gzippedPcapWrapper{outf, outgz, pcapWriter}, nil
+	} else {
+		pcapWriter := pcapgo.NewWriter(outf)
+		pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
+		return &regularPcapWrapper{outf, pcapWriter}, nil
+	}
 }
 
 //renamePcap renames the 'current' file to
 //writeOutputPath/yyy/mm/dd/yyyy-mm-ddThh-mm-ss.pcap.gz
 
 func renamePcap(tempName, outputPath string) error {
-	datePart := time.Now().Format("2006/01/02/2006-01-02T15-04-05.pcap.gz")
+	datePart := time.Now().Format("2006/01/02/2006-01-02T15-04-05.pcap")
+	if writeCompressed {
+		datePart = datePart + ".gz"
+		tempName = tempName + ".gz"
+	}
 
 	newName := filepath.Join(outputPath, datePart)
 	//Ensure the directori exists
@@ -383,7 +408,7 @@ func main() {
 
 	go metrics()
 
-	currentFileName := fmt.Sprintf("%s_current.pcap.gz.tmp", iface)
+	currentFileName := fmt.Sprintf("%s_current.pcap.tmp", iface)
 	workerCountString := os.Getenv("SNF_NUM_RINGS")
 	workerCount := mustAtoiWithDefault(workerCountString, 1)
 
@@ -405,7 +430,7 @@ func main() {
 	//Rename any leftover pcap files from a previous run
 	renamePcap(currentFileName, writeOutputPath)
 
-	var pcapWriter *gzippedPcapWrapper
+	var pcapWriter pcapWrapper
 	pcapWriter, err := openPcap(currentFileName)
 	if err != nil {
 		log.Fatal("Error opening pcap", err)
