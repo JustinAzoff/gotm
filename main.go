@@ -98,6 +98,14 @@ var (
 		}, labels,
 	)
 
+	mFlowSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "gotm_flow_size_bytes",
+			Help:    "Bytes per flow",
+			Buckets: prometheus.ExponentialBuckets(1024, 4, 15),
+		},
+	)
+
 	// These should be gauges, but can't.. https://github.com/prometheus/client_golang/issues/309
 	mReceived = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -141,6 +149,7 @@ func init() {
 	prometheus.MustRegister(mReceived)
 	prometheus.MustRegister(mDropped)
 	prometheus.MustRegister(mIfDropped)
+	prometheus.MustRegister(mFlowSize)
 }
 
 type trackedFlow struct {
@@ -281,6 +290,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 					if lastcleanup.Sub(flw.last) > flowTimeout {
 						remove = append(remove, flow)
 						removedFlows += 1
+						mFlowSize.Observe(float64(flw.bytecount))
 					}
 				}
 				for _, rem := range remove {
