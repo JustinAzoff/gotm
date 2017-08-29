@@ -103,7 +103,6 @@ $ ./gotm -rotationinterval 60s -interface en0 -compress
 2017/08/29 17:56:37 moved en0_current.pcap.tmp.gz to out/2017/08/29/2017-08-29T17-56-37.pcap.gz
 
 $ du -hs out/2017/08/29/*
- 64K	out/2017/08/29/2017-08-29T17-45-52.pcap
 248K	out/2017/08/29/2017-08-29T17-46-58.pcap.gz
 160K	out/2017/08/29/2017-08-29T17-47-58.pcap.gz
  40K	out/2017/08/29/2017-08-29T17-48-58.pcap.gz
