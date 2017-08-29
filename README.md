@@ -11,7 +11,7 @@ Most people probably want to use stenographer.  If AFPacket was not broken on RH
 
 ### Simple
 
-gotm is under 500 lines of code, About 1/3 of that is related to metrics.
+gotm is under 500 lines of code with 1/3 of that related to metrics.  There's only maybe 25 lines of code that have anything to do with packets.
 
 ### Standard output format with optional gzip compression
 
@@ -19,7 +19,8 @@ gotm outputs files in standard pcap format.  pcaps can be compressed on the fly.
 
 ### Flow cutoff
 
-With a flow cutoff of 64k, we still capture full flows for 99.8% of connections.
+gotm can cutoff flows at a configurable packet or byte boundary.
+With a flow cutoff of 64k we still capture full flows for 99.8% of connections.
 The other 0.2% of connections account for 99% of the traffic.
 
 ### Supports capture methods other than AFPacket
