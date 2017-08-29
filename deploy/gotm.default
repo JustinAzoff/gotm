@@ -1,0 +1,14 @@
+SNF_APP_ID=2
+SNF_DATARING_SIZE=4096MB
+SNF_DESCRING_SIZE=1024MB
+SNF_NUM_RINGS=8
+SNF_FLAGS=0x101
+
+GOTM_INTERFACES=ens1,ens4
+GOTM_ARGS=-timeinterval 31s \
+    -flowtimeout 30s \
+    -rotationinterval 60s \
+    -write pcaps \
+    -filter 'vlan or not vlan' \
+    -packetcutoff 1000 -bytecutoff 65536 \
+    -metrics-address :9102

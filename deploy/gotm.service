@@ -1,0 +1,26 @@
+[Unit]
+Description=gotm Go Time Machine
+After=network.target
+
+[Service]
+User=gotm
+Group=gotm
+
+PermissionsStartOnly=true
+ExecStartPre=-/opt/snf/bin/myri_counters  -c -p 0
+ExecStartPre=-/opt/snf/bin/myri_counters  -c -p 1
+
+EnvironmentFile=/etc/default/gotm
+
+#ProtectSystem=strict
+#ReadWritePaths=/tm
+WorkingDirectory=/tm
+
+
+ExecStart=/usr/bin/gotm -interface ${GOTM_INTERFACES} $GOTM_ARGS
+
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
