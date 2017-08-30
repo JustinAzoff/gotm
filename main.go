@@ -390,7 +390,7 @@ func renamePcap(tempName, outputPath string) error {
 
 	newName := filepath.Join(outputPath, datePart)
 	//Ensure the directori exists
-	if err := os.MkdirAll(filepath.Dir(newName), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(newName), 0777); err != nil {
 		return err
 	}
 	err := os.Rename(tempName, newName)
