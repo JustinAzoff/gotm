@@ -28,7 +28,7 @@ import (
 const (
 	MAX_ETHERNET_MTU       = 9216
 	MINIMUM_IP_PACKET_SIZE = 58
-	LARGE_FLOW_SIZE        = 1024 * 1024 * 1024 * 8 //8 GB
+	LARGE_FLOW_SIZE        = 1024 * 1024 * 1024 * 16 //16 GB
 )
 
 var (
@@ -65,6 +65,12 @@ var (
 		prometheus.GaugeOpts{
 			Name: "gotm_expired_flow_count",
 			Help: "Current number of expired flows in the last packetTimeInterval",
+		}, labels,
+	)
+	mExpiredDur = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "gotm_expired_flow_duration_seconds",
+			Help: "Time taken to expire flows in the last packetTimeInterval",
 		}, labels,
 	)
 	mBytes = prometheus.NewCounterVec(
@@ -141,6 +147,7 @@ func init() {
 
 	prometheus.MustRegister(mActiveFlows)
 	prometheus.MustRegister(mExpired)
+	prometheus.MustRegister(mExpiredDur)
 	prometheus.MustRegister(mPackets)
 	prometheus.MustRegister(mOutput)
 	prometheus.MustRegister(mBytes)
@@ -302,6 +309,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 					pcapStats.PacketsReceived, pcapStats.PacketsDropped, pcapStats.PacketsIfDropped)
 
 				mExpired.WithLabelValues(intf, workerString).Set(float64(len(remove)))
+				mExpiredDur.WithLabelValues(intf, workerString).Set(float64(time.Since(lastcleanup).Seconds()))
 			}
 			mActiveFlows.WithLabelValues(intf, workerString).Set(float64(len(seen)))
 
