@@ -69,7 +69,7 @@ var (
 	)
 	mExpiredDurTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "gotm_expired_flow_duration_total",
+			Name: "gotm_expired_flow_duration_seconds_sum",
 			Help: "Total time spent expiring flows",
 		}, labels,
 	)
