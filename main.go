@@ -67,10 +67,10 @@ var (
 			Help: "Current number of expired flows in the last packetTimeInterval",
 		}, labels,
 	)
-	mExpiredDur = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "gotm_expired_flow_duration_seconds",
-			Help: "Time taken to expire flows in the last packetTimeInterval",
+	mExpiredDurTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gotm_expired_flow_duration_total",
+			Help: "Total time spent expiring flows",
 		}, labels,
 	)
 	mBytes = prometheus.NewCounterVec(
@@ -147,7 +147,7 @@ func init() {
 
 	prometheus.MustRegister(mActiveFlows)
 	prometheus.MustRegister(mExpired)
-	prometheus.MustRegister(mExpiredDur)
+	prometheus.MustRegister(mExpiredDurTotal)
 	prometheus.MustRegister(mPackets)
 	prometheus.MustRegister(mOutput)
 	prometheus.MustRegister(mBytes)
@@ -308,8 +308,9 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 					totalBytes, totalPackets, outputPackets, 100*float64(outputPackets)/float64(totalPackets),
 					pcapStats.PacketsReceived, pcapStats.PacketsDropped, pcapStats.PacketsIfDropped)
 
+				expireSeconds := float64(time.Since(lastcleanup).Seconds())
 				mExpired.WithLabelValues(intf, workerString).Set(float64(len(remove)))
-				mExpiredDur.WithLabelValues(intf, workerString).Set(float64(time.Since(lastcleanup).Seconds()))
+				mExpiredDurTotal.WithLabelValues(intf, workerString).Add(expireSeconds)
 			}
 			mActiveFlows.WithLabelValues(intf, workerString).Set(float64(len(seen)))
 
