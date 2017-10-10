@@ -225,6 +225,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	var tcp layers.TCP
 	var udp layers.UDP
 	parser := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, &eth, &dot1q, &ip4, &ip6, &tcp, &udp)
+	parser.IgnoreUnsupported = true
 	decoded := []gopacket.LayerType{}
 	var speedup int
 	for {
