@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-systemd/daemon"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -456,6 +458,7 @@ func main() {
 		log.Fatal("Error opening pcap", err)
 	}
 
+	daemon.SdNotify(false, "READY=1")
 	for {
 		select {
 		case pcf := <-pcapWriterChan:
