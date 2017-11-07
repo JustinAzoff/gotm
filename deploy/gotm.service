@@ -18,6 +18,7 @@ WorkingDirectory=/tm
 
 
 ExecStart=/usr/bin/gotm -interface ${GOTM_INTERFACES} $GOTM_ARGS
+Type=notify
 
 Restart=on-failure
 RestartSec=10s
