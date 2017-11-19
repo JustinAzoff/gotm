@@ -216,7 +216,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	}
 
 	seen := make(map[FiveTuple]*trackedFlow)
-	var totalFlows, removedFlows, totalBytes, outputBytes, totalPackets, outputPackets uint
+	var totalFlows, totalBytes, outputBytes, totalPackets, outputPackets uint
 	var pcapStats *pcap.Stats
 	lastcleanup := time.Now()
 
@@ -295,24 +295,21 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 			if time.Since(lastcleanup) > packetTimeInterval {
 				lastcleanup = time.Now()
 				//seen = make(map[string]*trackedFlow)
-				var remove []FiveTuple
+				var removedFlows int
 				for flow, flw := range seen {
 					if lastcleanup.Sub(flw.last) > flowTimeout {
-						remove = append(remove, flow)
 						removedFlows += 1
 						mFlowSize.Observe(float64(flw.bytecount))
+						delete(seen, flow)
 					}
 				}
-				for _, rem := range remove {
-					delete(seen, rem)
-				}
 				log.Printf("if=%s W=%02d flows=%d removed=%d bytes=%d pkts=%d output=%d outpct=%.1f recvd=%d dropped=%d ifdropped=%d",
-					intf, worker, len(seen), len(remove),
+					intf, worker, len(seen), removedFlows,
 					totalBytes, totalPackets, outputPackets, 100*float64(outputPackets)/float64(totalPackets),
 					pcapStats.PacketsReceived, pcapStats.PacketsDropped, pcapStats.PacketsIfDropped)
 
 				expireSeconds := float64(time.Since(lastcleanup).Seconds())
-				mExpired.WithLabelValues(intf, workerString).Set(float64(len(remove)))
+				mExpired.WithLabelValues(intf, workerString).Set(float64(removedFlows))
 				mExpiredDurTotal.WithLabelValues(intf, workerString).Add(expireSeconds)
 			}
 			mActiveFlows.WithLabelValues(intf, workerString).Set(float64(len(seen)))
