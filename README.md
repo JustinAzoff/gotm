@@ -41,7 +41,7 @@ In our environment it can handle a full 10-20gbit of traffic on a single box wit
 
 Stenographer and time-machine index packets to enable faster searching.
 
-gotm does not index anything, howevever [flow-indexer](https://github.com/JustinAzoff/flow-indexer) supports pcap files and can be used to search gotm output files for a particular address.
+gotm does not index anything, howevever [flow-indexer](https://github.com/JustinAzoff/flow-indexer) supports pcap files and can be used to search gotm output files for a particular address.  An example configuration is in [deploy](./deploy).
 
 I'm currently working on some analyst tools that integrate gotm and flow-indexer.
 
