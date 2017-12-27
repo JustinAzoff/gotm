@@ -463,7 +463,7 @@ func filterFlows(reqs chan FilterRequest) {
 
 		var fr dumbno.FilterRequest
 
-		if sport.String() != "" {
+		if sport.String() != "[]" {
 			sportInt := mustAtoiWithDefault(sport.String(), 0)
 			dportInt := mustAtoiWithDefault(dport.String(), 0)
 			fr = dumbno.FilterRequest{
