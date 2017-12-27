@@ -538,7 +538,6 @@ func main() {
 			}
 
 		case <-rotationTicker.C:
-			log.Print("Rotating")
 			//FIXME: refactor/wrap the open/close/rename code?
 			err = pcapWriter.Close()
 			if err != nil {
