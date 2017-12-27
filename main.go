@@ -190,7 +190,7 @@ type FiveTuple struct {
 func (f FiveTuple) String() string {
 	src, dst := f.networkFlow.Endpoints()
 	sport, dport := f.transportFlow.Endpoints()
-	return fmt.Sprintf("src=%s sport=%s dst=%s dport=%s", src, sport, dst, dport)
+	return fmt.Sprintf("proto=%s src=%s sport=%s dst=%s dport=%s", f.proto, src, sport, dst, dport)
 }
 
 func mustAtoiWithDefault(s string, defaultValue int) int {
