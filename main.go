@@ -30,7 +30,6 @@ import (
 const (
 	MAX_ETHERNET_MTU       = 9216
 	MINIMUM_IP_PACKET_SIZE = 58
-	LARGE_FLOW_SIZE        = 1024 * 1024 * 1024 * 16 //16 GB
 )
 
 var (
@@ -46,6 +45,8 @@ var (
 	writeCompressed    bool
 
 	rotationInterval time.Duration
+
+	largeFlowSizeMegabytes uint
 )
 
 //Metrics
@@ -147,6 +148,8 @@ func init() {
 	flag.BoolVar(&writeCompressed, "compress", false, "gzip pcaps as they are written")
 	flag.DurationVar(&rotationInterval, "rotationinterval", 300*time.Second, "Interval between pcap rotations")
 
+	flag.UintVar(&largeFlowSizeMegabytes, "largeflowsize", 1024, "Large flow size in megabytes")
+
 	prometheus.MustRegister(mActiveFlows)
 	prometheus.MustRegister(mExpired)
 	prometheus.MustRegister(mExpiredDurTotal)
@@ -165,7 +168,8 @@ type trackedFlow struct {
 	packets   uint
 	bytecount uint
 	last      time.Time
-	logged    bool
+	//The size in bytes at which this flow will be logged
+	logthresh uint
 }
 
 func (t trackedFlow) String() string {
@@ -230,6 +234,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 	parser.IgnoreUnsupported = true
 	decoded := []gopacket.LayerType{}
 	var speedup int
+	defaultLogThreshold := 1024 * 1024 * largeFlowSizeMegabytes
 	for {
 		packetData, ci, err := handle.ZeroCopyReadPacketData()
 		if err == io.EOF {
@@ -260,7 +265,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 
 		flw := seen[flow]
 		if flw == nil {
-			flw = &trackedFlow{}
+			flw = &trackedFlow{logthresh: defaultLogThreshold}
 			seen[flow] = flw
 			//log.Println("NEW", flw, flow)
 			totalFlows += 1
@@ -280,9 +285,9 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 			copy(packetDataCopy, packetData)
 
 			writerchan <- PcapFrame{ci, packetDataCopy}
-		} else if flw.logged == false && flw.bytecount > LARGE_FLOW_SIZE {
-			log.Printf("Large flow over 8GB: %s", flow)
-			flw.logged = true
+		} else if flw.bytecount > flw.logthresh {
+			log.Printf("Large flow: megabytes=%d %s", flw.logthresh/1024/1024, flow)
+			flw.logthresh *= 2
 		}
 		//Cleanup
 		speedup++
