@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/daemon"
+	dumbno "github.com/ncsa/dumbno-client-go"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -46,7 +47,9 @@ var (
 
 	rotationInterval time.Duration
 
+	dumnoEndpoint          string
 	largeFlowSizeMegabytes uint
+	dumbnoEnabled          bool
 )
 
 //Metrics
@@ -114,6 +117,12 @@ var (
 			Buckets: prometheus.ExponentialBuckets(1024, 4, 15),
 		},
 	)
+	mFlowsFiltered = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gotm_flows_filtered",
+			Help: "Number of flows filtered",
+		}, []string{"status"},
+	)
 
 	// These should be gauges, but can't.. https://github.com/prometheus/client_golang/issues/309
 	mReceived = prometheus.NewGaugeVec(
@@ -149,6 +158,7 @@ func init() {
 	flag.DurationVar(&rotationInterval, "rotationinterval", 300*time.Second, "Interval between pcap rotations")
 
 	flag.UintVar(&largeFlowSizeMegabytes, "largeflowsize", 1024, "Large flow size in megabytes")
+	flag.StringVar(&dumnoEndpoint, "dumbno", "", "Endpoint that dumbno is listening on, i.e. 127.0.0.1:9000")
 
 	prometheus.MustRegister(mActiveFlows)
 	prometheus.MustRegister(mExpired)
@@ -162,6 +172,7 @@ func init() {
 	prometheus.MustRegister(mDropped)
 	prometheus.MustRegister(mIfDropped)
 	prometheus.MustRegister(mFlowSize)
+	prometheus.MustRegister(mFlowsFiltered)
 }
 
 type trackedFlow struct {
@@ -193,6 +204,11 @@ func (f FiveTuple) String() string {
 	return fmt.Sprintf("proto=%s src=%s sport=%s dst=%s dport=%s", f.proto, src, sport, dst, dport)
 }
 
+type FilterRequest struct {
+	ft FiveTuple
+	ts time.Time
+}
+
 func mustAtoiWithDefault(s string, defaultValue int) int {
 	if s == "" {
 		return defaultValue
@@ -204,7 +220,7 @@ func mustAtoiWithDefault(s string, defaultValue int) int {
 	return i
 }
 
-func doSniff(intf string, worker int, writerchan chan PcapFrame) {
+func doSniff(intf string, worker int, writerchan chan PcapFrame, flowfilterchan chan FilterRequest) {
 	runtime.LockOSThread()
 	log.Printf("Starting worker %d on interface %s", worker, intf)
 	workerString := fmt.Sprintf("%d", worker)
@@ -287,6 +303,9 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 			writerchan <- PcapFrame{ci, packetDataCopy}
 		} else if flw.bytecount > flw.logthresh {
 			log.Printf("Large flow: megabytes=%d %s", flw.logthresh/1024/1024, flow)
+			if dumbnoEnabled {
+				flowfilterchan <- FilterRequest{ft: flow, ts: time.Now()}
+			}
 			flw.logthresh *= 2
 		}
 		//Cleanup
@@ -427,10 +446,58 @@ func metrics() {
 	//Not fatal?
 }
 
+func filterFlows(reqs chan FilterRequest) {
+	c, err := dumbno.NewClient(dumnoEndpoint)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for req := range reqs {
+		if time.Since(req.ts) > 60*time.Second {
+			log.Printf("Ignoring flow filter request older than 60 seconds: %s", time.Since(req.ts))
+			mFlowsFiltered.WithLabelValues("ignored").Add(1)
+			continue
+		}
+		f := req.ft
+		src, dst := f.networkFlow.Endpoints()
+		sport, dport := f.transportFlow.Endpoints()
+
+		var fr dumbno.FilterRequest
+
+		if sport.String() != "" {
+			sportInt := mustAtoiWithDefault(sport.String(), 0)
+			dportInt := mustAtoiWithDefault(dport.String(), 0)
+			fr = dumbno.FilterRequest{
+				Proto: f.proto.String(),
+				Src:   src.String(),
+				Dst:   dst.String(),
+				Sport: sportInt,
+				Dport: dportInt,
+			}
+		} else {
+			fr = dumbno.FilterRequest{
+				Src: src.String(),
+				Dst: dst.String(),
+			}
+		}
+		err = c.AddACL(fr)
+		if err != nil {
+			log.Printf("filterFlows: AddACL Failed: %s", err)
+			mFlowsFiltered.WithLabelValues("err").Add(1)
+		} else {
+			mFlowsFiltered.WithLabelValues("ok").Add(1)
+		}
+	}
+}
+
 func main() {
 	flag.Parse()
-
 	go metrics()
+
+	flowFilterChan := make(chan FilterRequest, 10000)
+	if dumnoEndpoint != "" {
+		dumbnoEnabled = true
+	}
+	go filterFlows(flowFilterChan)
 
 	currentFileName := fmt.Sprintf("%s_current.pcap.tmp", iface)
 	workerCountString := os.Getenv("SNF_NUM_RINGS")
@@ -443,7 +510,7 @@ func main() {
 	for _, iface := range interfaceList {
 		log.Printf("Starting capture on %s with %d workers", iface, workerCount)
 		for worker := 0; worker < workerCount; worker++ {
-			go doSniff(iface, worker, pcapWriterChan)
+			go doSniff(iface, worker, pcapWriterChan, flowFilterChan)
 		}
 	}
 
