@@ -496,8 +496,8 @@ func main() {
 	flowFilterChan := make(chan FilterRequest, 10000)
 	if dumnoEndpoint != "" {
 		dumbnoEnabled = true
+		go filterFlows(flowFilterChan)
 	}
-	go filterFlows(flowFilterChan)
 
 	currentFileName := fmt.Sprintf("%s_current.pcap.tmp", iface)
 	workerCountString := os.Getenv("SNF_NUM_RINGS")
