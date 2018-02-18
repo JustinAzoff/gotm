@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -171,6 +172,17 @@ type trackedFlow struct {
 func (t trackedFlow) String() string {
 	return fmt.Sprintf("packets=%d bytecount=%d last=%s", t.packets, t.bytecount, t.last)
 }
+func (t *trackedFlow) Reset() {
+	t.packets = 0
+	t.bytecount = 0
+	t.logged = false
+}
+
+var trackedFlowPool = sync.Pool{
+	New: func() interface{} {
+		return new(trackedFlow)
+	},
+}
 
 type PcapFrame struct {
 	ci   gopacket.CaptureInfo
@@ -260,7 +272,7 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 
 		flw := seen[flow]
 		if flw == nil {
-			flw = &trackedFlow{}
+			flw = trackedFlowPool.Get().(*trackedFlow)
 			seen[flow] = flw
 			//log.Println("NEW", flw, flow)
 			totalFlows += 1
@@ -300,6 +312,8 @@ func doSniff(intf string, worker int, writerchan chan PcapFrame) {
 					if lastcleanup.Sub(flw.last) > flowTimeout {
 						removedFlows += 1
 						mFlowSize.Observe(float64(flw.bytecount))
+						flw.Reset()
+						trackedFlowPool.Put(flw)
 						delete(seen, flow)
 					}
 				}
