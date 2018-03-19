@@ -1,0 +1,92 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from collections import namedtuple
+import argparse
+import os
+import shutil
+
+parser = argparse.ArgumentParser(description='Delete PCAPs from gotm when getting close to running out of disk')
+parser.add_argument('-b', dest='basedir', help='Base directory for PCAP storage (e.g. /srv for /srv/pcaps)', required=True)
+parser.add_argument('-t', dest='threshold', help='Threshold (in GB) at which to start deleting PCAPs', required=True)
+parser.add_argument('-v', dest='verbose', action='store_true', help='Enable verbose output')
+args = parser.parse_args()
+
+BASE = args.base
+GIG = 1024*1024*1024
+THRESHOLD = args.threshold * GIG
+VERBOSE = args.verbose
+
+# https://stackoverflow.com/questions/4260116/find-size-and-free-space-of-the-filesystem-containing-a-given-file
+DiskUage = namedtuple('usage',  'total used free percent')
+def disk_usage(path):
+    """Return disk usage associated with path."""
+    st = os.statvfs(path)
+    free = (st.f_bavail * st.f_frsize)
+    total = (st.f_blocks * st.f_frsize)
+    used = (st.f_blocks - st.f_bfree) * st.f_frsize
+    try:
+        percent = ret = (float(used) / total) * 100
+    except ZeroDivisionError:
+        percent = 0
+    # NB: the percentage is -5% than what shown by df due to
+    # reserved blocks that we are currently not considering:
+    # http://goo.gl/sWGbH
+    return DiskUage(total, used, free, round(percent, 1))
+
+def find_pcaps(root=BASE+"/pcaps"):
+    for year in sorted(os.listdir(root)):
+        for month in sorted(os.listdir(os.path.join(root, year))):
+            for day in sorted(os.listdir(os.path.join(root, year, month))):
+                for pcap in sorted(os.listdir(os.path.join(root, year, month, day))):
+                    if 'pcap' in pcap:
+                        yield os.path.join(root, year, month, day, pcap)
+
+def cleanup_pcaps():
+    if disk_usage(BASE).free > THRESHOLD:
+        return 0
+
+    removed = 0
+    for f in find_pcaps():
+        os.unlink(f)
+        removed += 1
+        if disk_usage(BASE).free > THRESHOLD:
+            break
+
+    return removed
+
+def remove_empty_dirs(root=BASE+"/pcaps"):
+    removed_dirs = 0
+    for year in sorted(os.listdir(root)):
+        for month in sorted(os.listdir(os.path.join(root, year))):
+            for day in sorted(os.listdir(os.path.join(root, year, month))):
+                try:
+                    os.removedirs(os.path.join(root, year, month, day))
+                    removed_dirs += 1
+                except OSError:
+                    pass
+    return removed_dirs
+
+def cleanup_index():
+    removed_indexes = 0
+    for index in sorted(os.listdir(BASE + "/index/")):
+        index_path = os.path.join(BASE, "index", index)
+        y,m,d = index.replace('.db','').split("-")
+        pcap_path = os.path.join(BASE, "pcaps", y, m, d)
+        if not os.path.isdir(pcap_path):
+            if VERBOSE:
+                print("Removing", index_path)
+            shutil.rmtree(index_path)
+            removed_indexes += 1
+    return removed_indexes
+
+def cleanup():
+    removed_pcaps = cleanup_pcaps()
+    removed_dirs = remove_empty_dirs()
+    removed_indexes = cleanup_index()
+    if VERBOSE:
+        print ("Removed pcaps", removed_pcaps)
+        print ("Removed dirs", removed_dirs)
+        print ("Removed indexes", removed_indexes)
+
+if __name__ == "__main__":
+    cleanup()
