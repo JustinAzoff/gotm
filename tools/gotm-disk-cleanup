@@ -11,7 +11,7 @@ parser.add_argument('-t', dest='threshold', help='Threshold (in GB) at which to 
 parser.add_argument('-v', dest='verbose', action='store_true', help='Enable verbose output')
 args = parser.parse_args()
 
-BASE = args.base
+BASE = args.basedir
 GIG = 1024*1024*1024
 THRESHOLD = args.threshold * GIG
 VERBOSE = args.verbose
