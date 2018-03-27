@@ -7,7 +7,7 @@ import shutil
 
 parser = argparse.ArgumentParser(description='Delete PCAPs from gotm when getting close to running out of disk')
 parser.add_argument('-b', dest='basedir', help='Base directory for PCAP storage (e.g. /srv for /srv/pcaps)', required=True)
-parser.add_argument('-t', dest='threshold', help='Threshold (in GB) at which to start deleting PCAPs', required=True)
+parser.add_argument('-t', dest='threshold', help='Threshold (in GB) at which to start deleting PCAPs', required=True, type=int)
 parser.add_argument('-v', dest='verbose', action='store_true', help='Enable verbose output')
 args = parser.parse_args()
 
