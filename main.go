@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"flag"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 const (
 	MAX_ETHERNET_MTU       = 9216
 	MINIMUM_IP_PACKET_SIZE = 58
+	OUTPUT_BUFFER_SIZE     = 16 * 1024 * 1024
 )
 
 var (
@@ -366,22 +368,42 @@ type pcapWrapper interface {
 }
 
 type regularPcapWrapper struct {
-	io.WriteCloser
+	w io.WriteCloser
+	b *bufio.Writer
 	*pcapgo.Writer
+}
+
+func (wrapper *regularPcapWrapper) Close() error {
+	flusherr := wrapper.b.Flush()
+	ferr := wrapper.w.Close()
+
+	if flusherr != nil {
+		return flusherr
+	}
+	if ferr != nil {
+		return ferr
+	}
+
+	return nil
 }
 
 type gzippedPcapWrapper struct {
 	w io.WriteCloser
 	z *gzip.Writer
+	b *bufio.Writer
 	*pcapgo.Writer
 }
 
 func (wrapper *gzippedPcapWrapper) Close() error {
 	gzerr := wrapper.z.Close()
+	flusherr := wrapper.b.Flush()
 	ferr := wrapper.w.Close()
 
 	if gzerr != nil {
 		return gzerr
+	}
+	if flusherr != nil {
+		return flusherr
 	}
 	if ferr != nil {
 		return ferr
@@ -399,15 +421,25 @@ func openPcap(baseFilename string) (pcapWrapper, error) {
 	if err != nil {
 		return nil, err
 	}
+	buffered := bufio.NewWriterSize(outf, OUTPUT_BUFFER_SIZE)
 	if writeCompressed {
-		outgz := gzip.NewWriter(outf)
+		outgz := gzip.NewWriter(buffered)
 		pcapWriter := pcapgo.NewWriter(outgz)
 		pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
-		return &gzippedPcapWrapper{outf, outgz, pcapWriter}, nil
+		return &gzippedPcapWrapper{
+			w:      outf,
+			z:      outgz,
+			b:      buffered,
+			Writer: pcapWriter,
+		}, nil
 	} else {
-		pcapWriter := pcapgo.NewWriter(outf)
+		pcapWriter := pcapgo.NewWriter(buffered)
 		pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet) // new file, must do this.
-		return &regularPcapWrapper{outf, pcapWriter}, nil
+		return &regularPcapWrapper{
+			w:      outf,
+			b:      buffered,
+			Writer: pcapWriter,
+		}, nil
 	}
 }
 
